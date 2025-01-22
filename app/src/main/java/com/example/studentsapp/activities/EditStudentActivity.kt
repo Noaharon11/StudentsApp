@@ -1,10 +1,14 @@
 package com.example.studentsapp.activities
 
+import android.content.Intent
 import android.os.Bundle
+import android.os.Looper
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.example.studentsapp.R
 import com.example.studentsapp.data.StudentRepository
@@ -12,67 +16,143 @@ import com.example.studentsapp.models.Student
 
 class EditStudentActivity : AppCompatActivity() {
 
-    private lateinit var student: Student
+    private lateinit var nameInput: EditText
+    private lateinit var idInput: EditText
+    private lateinit var phoneInput: EditText
+    private lateinit var addressInput: EditText
+    private lateinit var saveButton: Button
+    private lateinit var deleteButton: Button
+    private lateinit var cancelButton: Button
+    private lateinit var studentImageView: ImageView
+    private var currentStudent: Student? = null
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_edit_student)
 
-        // Fetch student details from intent
-        student = intent.getSerializableExtra("student") as Student
-
         // Initialize views
-        val studentImageView = findViewById<ImageView>(R.id.studentImageView)
-        val nameInput = findViewById<EditText>(R.id.nameInput)
-        val idInput = findViewById<EditText>(R.id.idInput)
-        val phoneInput = findViewById<EditText>(R.id.phoneInput)
-        val addressInput = findViewById<EditText>(R.id.addressInput)
-        val saveButton = findViewById<Button>(R.id.saveButton)
-        val deleteButton = findViewById<Button>(R.id.deleteButton)
-        val cancelButton = findViewById<Button>(R.id.cancelButton)
+        nameInput = findViewById(R.id.nameInput)
+        idInput = findViewById(R.id.idInput)
+        phoneInput = findViewById(R.id.phoneInput)
+        addressInput = findViewById(R.id.addressInput)
+        saveButton = findViewById(R.id.saveButton)
+        deleteButton = findViewById(R.id.deleteButton)
+        cancelButton = findViewById(R.id.cancelButton)
+        studentImageView = findViewById(R.id.studentImageView)
 
-        // Populate fields with student data
-        studentImageView.setImageResource(R.drawable.default_student_image) // Default or loaded image
-        nameInput.setText(student.name)
-        idInput.setText(student.id)
-        phoneInput.setText(student.phone)
-        addressInput.setText(student.address)
-
-        // Save button click
-        saveButton.setOnClickListener {
-            val updatedName = nameInput.text.toString()
-            val updatedId = idInput.text.toString()
-            val updatedPhone = phoneInput.text.toString()
-            val updatedAddress = addressInput.text.toString()
-
-            if (updatedName.isNotEmpty() && updatedId.isNotEmpty() && updatedPhone.isNotEmpty() && updatedAddress.isNotEmpty()) {
-                // Update the student object
-                val updatedStudent = student.copy(
-                    name = updatedName,
-                    id = updatedId,
-                    phone = updatedPhone,
-                    address = updatedAddress
-                )
-
-                // Update in repository
-                StudentRepository.updateStudent(updatedStudent)
-                Toast.makeText(this, "Student updated successfully!", Toast.LENGTH_SHORT).show()
-                finish() // Return to the previous screen
-            } else {
-                Toast.makeText(this, "Please fill all fields", Toast.LENGTH_SHORT).show()
+        // Get student from intent
+        currentStudent = intent.getParcelableExtra("student")
+        currentStudent?.let { student ->
+            nameInput.setText(student.name)
+            idInput.setText(student.id)
+            phoneInput.setText(student.phone)
+            addressInput.setText(student.address)
+            if (student.imageUri.isNotEmpty()) {
+                studentImageView.setImageURI(android.net.Uri.parse(student.imageUri))
             }
         }
 
-        // Delete button click
-        deleteButton.setOnClickListener {
-            StudentRepository.deleteStudent(student)
-            Toast.makeText(this, "Student deleted successfully!", Toast.LENGTH_SHORT).show()
-            finish() // Return to the previous screen
+
+        // Save button
+        saveButton.setOnClickListener {
+            val name = nameInput.text.toString()
+            val id = idInput.text.toString()
+            val phone = phoneInput.text.toString()
+            val address = addressInput.text.toString()
+
+            // Validate empty fields
+            if (name.isEmpty()) {
+                nameInput.error = "Name cannot be empty"
+                nameInput.requestFocus()
+                return@setOnClickListener
+            }
+            if (id.isEmpty()) {
+                idInput.error = "ID cannot be empty"
+                idInput.requestFocus()
+                return@setOnClickListener
+            }
+            if (phone.isEmpty()) {
+                phoneInput.error = "Phone cannot be empty"
+                phoneInput.requestFocus()
+                return@setOnClickListener
+            }
+            if (address.isEmpty()) {
+                addressInput.error = "Address cannot be empty"
+                addressInput.requestFocus()
+                return@setOnClickListener
+            }
+
+            if (StudentRepository.getStudentById(id) != null) {
+                idInput.error = "ID already exists"
+                idInput.requestFocus()
+                return@setOnClickListener
+            }
+
+            val updatedStudent = currentStudent?.copy(
+                name = name,
+                id = id,
+                phone = phone,
+                address = address
+            )
+
+            if (updatedStudent != null) {
+                StudentRepository.updateStudent(updatedStudent, oldId = currentStudent!!.id)
+                Toast.makeText(this, "Student updated successfully!", Toast.LENGTH_SHORT).show()
+                android.os.Handler(Looper.getMainLooper()).postDelayed({
+                    finish()
+                }, 1000) // 1000 milliseconds = 1 second
+            }
         }
 
-        // Cancel button click
+        // Delete button
+        deleteButton.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Delete Student")
+                .setMessage("Are you sure you want to delete this student?")
+                .setPositiveButton("Yes") { _, _ ->
+                    currentStudent?.let { student ->
+                        StudentRepository.deleteStudent(student)
+                        Toast.makeText(this, "Student deleted!", Toast.LENGTH_SHORT).show()
+                        finish()
+                    }
+                }
+                .setNegativeButton("No", null)
+                .show()
+        }
+
+        // Cancel button
         cancelButton.setOnClickListener {
-            finish() // Return to the previous screen without saving
+            if (isStudentDataChanged()) {
+                showCancelConfirmationDialog()
+            } else {
+                finish()
+            }
         }
     }
+
+    private fun isStudentDataChanged(): Boolean {
+        return currentStudent?.let { student ->
+            student.name != nameInput.text.toString() ||
+                    student.id != idInput.text.toString() ||
+                    student.phone != phoneInput.text.toString() ||
+                    student.address != addressInput.text.toString()
+        } ?: false
+    }
+
+    private fun showCancelConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Unsaved Changes")
+            .setMessage("You have unsaved changes. Are you sure you want to cancel?")
+            .setPositiveButton("Yes") { dialog, _ ->
+                dialog.dismiss()
+                finish()
+            }
+            .setNegativeButton("No") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .create()
+            .show()
+    }
+
 }
